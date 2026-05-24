@@ -17,3 +17,17 @@ print(embeddings)
 
 print("\nEMBEDDING SHAPE:\n")
 print(embeddings.shape)
+
+MODEL_PATH = (
+    PROJECT_ROOT /
+    "data" /
+    "graph" /
+    "graphsage_model.pth"
+)
+
+torch.save(
+    model.state_dict(),
+    MODEL_PATH
+)
+
+print(f"\nSaved model to: {MODEL_PATH}")

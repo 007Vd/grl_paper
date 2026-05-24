@@ -1,9 +1,63 @@
 import gymnasium as gym
 import numpy as np
 import pandas as pd
+import torch
 
 from gymnasium import spaces
 from pathlib import Path
+from torch_geometric.data import Data
+import sys
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parents[2]
+)
+sys.path.append(
+    str(PROJECT_ROOT)
+)
+from src.models.graphsage_model import GraphSAGE
+
+
+TOP_FEATURES = [
+    "trimmed_pce",
+    "adj_close",
+    "sma_10",
+    "rsi_14",
+    "personal_savings_rate",
+    "macd",
+    "open",
+    "real_auto_sales",
+    "ema_10",
+    "cpi",
+    "volume",
+    "financial_conditions",
+    "core_sticky_inflation",
+    "recession_probability",
+    "ema_5",
+    "sma_5"
+]
+
+ALL_NODES = [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "GOOG",
+    "GOOGL",
+    "AMZN",
+    "TSLA",
+    "BRK-B",
+    "JNJ",
+    "UNH",
+    "XLK",
+    "XLF",
+    "XLY",
+    "XLV",
+    "GSPC",
+    "N225",
+    "FTSE",
+    "TNX",
+    "FVX"
+]
 
 
 class PortfolioEnv(gym.Env):
@@ -58,42 +112,59 @@ class PortfolioEnv(gym.Env):
             "processed"
         )
 
+        GRAPH_MODEL_PATH = (
+            PROJECT_ROOT /
+            "data" /
+            "graph" /
+            "graphsage_model.pth"
+        )
+
         self.price_data = {}
 
-        for asset in self.assets:
+        for node in ALL_NODES:
 
             file_path = (
                 PROCESSED_DATA_DIR /
-                f"{asset}_merged.csv"
+                f"{node}_merged.csv"
             )
 
             df = pd.read_csv(file_path)
 
-            self.price_data[asset] = df
+            self.price_data[node] = df
 
         returns = []
 
         min_length = float("inf")
 
         for asset in self.assets:
-                df = self.price_data[asset]
-                asset_returns = (
-                    df["close"]
-                    .pct_change()
-                    .fillna(0)
-                    .values
-                    )
-              
 
-                returns.append(asset_returns)
+            df = self.price_data[asset]
 
-                min_length = min(min_length,len(asset_returns))
+            asset_returns = (
+                df["close"]
+                .pct_change()
+                .fillna(0)
+                .values
+            )
 
+            returns.append(asset_returns)
+
+            min_length = min(
+                min_length,
+                len(asset_returns)
+            )
 
         aligned_returns = []
+
         for asset_returns in returns:
-              aligned_returns.append(asset_returns[-min_length:])
-        self.returns_matrix = np.array(aligned_returns).T
+
+            aligned_returns.append(
+                asset_returns[-min_length:]
+            )
+
+        self.returns_matrix = np.array(
+            aligned_returns
+        ).T
 
         print(
             "\nRETURNS MATRIX SHAPE:\n"
@@ -103,16 +174,123 @@ class PortfolioEnv(gym.Env):
             self.returns_matrix.shape
         )
 
+        self.graphsage = GraphSAGE(
+            input_dim=16,
+            hidden_dim=32,
+            output_dim=16
+        )
+
+        self.graphsage.load_state_dict(
+            torch.load(
+                GRAPH_MODEL_PATH,
+                map_location=torch.device("cpu")
+            )
+        )
+
+        self.graphsage.eval()
+
+        node_to_idx = {
+            node: idx
+            for idx, node in enumerate(ALL_NODES)
+        }
+
+        EDGES = [
+
+            ("AAPL", "XLK"),
+            ("MSFT", "XLK"),
+            ("NVDA", "XLK"),
+            ("GOOG", "XLK"),
+            ("GOOGL", "XLK"),
+            ("AMZN", "XLK"),
+
+            ("JNJ", "XLV"),
+            ("UNH", "XLV"),
+
+            ("AMZN", "XLY"),
+            ("TSLA", "XLY"),
+
+            ("AAPL", "GSPC"),
+            ("MSFT", "GSPC"),
+            ("NVDA", "GSPC"),
+            ("GOOG", "GSPC"),
+            ("GOOGL", "GSPC"),
+            ("AMZN", "GSPC"),
+            ("TSLA", "GSPC"),
+            ("BRK-B", "GSPC"),
+            ("JNJ", "GSPC"),
+            ("UNH", "GSPC"),
+
+            ("TNX", "GSPC"),
+            ("FVX", "GSPC"),
+
+            ("N225", "GSPC"),
+            ("FTSE", "GSPC")
+        ]
+
+        edges = []
+
+        for src, dst in EDGES:
+
+            edges.append((
+                node_to_idx[src],
+                node_to_idx[dst]
+            ))
+
+            edges.append((
+                node_to_idx[dst],
+                node_to_idx[src]
+            ))
+
+        edge_index = torch.tensor(
+            edges,
+            dtype=torch.long
+        ).t().contiguous()
+
+        self.edge_index = edge_index
+
         self.current_step = 0
 
         self.portfolio_value = 1.0
 
+        self.max_steps = min_length - 1
+
     def _get_state(self):
 
-        return np.random.randn(
-            self.num_assets,
-            self.embedding_dim
-        ).astype(np.float32)
+        node_features = []
+
+        for node in ALL_NODES:
+
+            df = self.price_data[node]
+
+            row = df.iloc[self.current_step]
+
+            feature_vector = (
+                row[TOP_FEATURES]
+                .values
+                .astype(np.float32)
+            )
+
+            node_features.append(
+                feature_vector
+            )
+
+        x = torch.tensor(
+            node_features,
+            dtype=torch.float
+        )
+
+        with torch.no_grad():
+
+            embeddings = self.graphsage(
+                x,
+                self.edge_index
+            )
+
+        tradable_embeddings = embeddings[
+            :self.num_assets
+        ]
+
+        return tradable_embeddings.numpy()
 
     def reset(
         self,
@@ -136,7 +314,11 @@ class PortfolioEnv(gym.Env):
 
         self.current_step += 1
 
-        action = np.clip(action, 0, 1)
+        action = np.clip(
+            action,
+            0,
+            1
+        )
 
         action = action / (
             action.sum() + 1e-8
@@ -161,7 +343,7 @@ class PortfolioEnv(gym.Env):
 
         terminated = (
             self.current_step >=
-            len(self.returns_matrix) - 1
+            self.max_steps
         )
 
         truncated = False
