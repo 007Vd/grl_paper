@@ -5,4 +5,5 @@ outputs/checkpoints/
 outputs/logs/
 data/raw
 data/processed
+data/graph
 .env
