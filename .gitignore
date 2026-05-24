@@ -4,4 +4,5 @@ __pycache__/
 outputs/checkpoints/
 outputs/logs/
 data/raw
+data/processed
 .env
