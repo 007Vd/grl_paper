@@ -28,8 +28,9 @@ for file in files:
 
 summary=[]
 
-for file in files:
+print("SUMMARY")
 
+for file in files:
     df=pd.read_csv(file)
     summary.append({
         "file":file.name,
