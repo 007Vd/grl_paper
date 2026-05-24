@@ -12,3 +12,4 @@ lightgbm
 tensorboard
 network
 jupyter
+dotenv
