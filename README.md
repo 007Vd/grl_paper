@@ -13,3 +13,9 @@ Graph Constructed
 Phase 5:GraphSage layer called, GraphSage Model created and Graph visualised
 
 Phase 6: Form the ftructre of the PPO model, set the environment, the actions, rewards and next updates
+
+Phase 7: PPO trained acc to graph embeddings
+
+phase 8: adding realism to the PPO rewards
+
+phase 9: updating the hyperparameters for the ppo model, caclulating financial metrics

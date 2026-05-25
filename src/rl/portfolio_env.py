@@ -1,22 +1,16 @@
 import gymnasium as gym
 import numpy as np
 import pandas as pd
-import torch
 
 from gymnasium import spaces
 from pathlib import Path
-from torch_geometric.data import Data
-import sys
+
+
 PROJECT_ROOT = (
     Path(__file__)
     .resolve()
     .parents[2]
 )
-sys.path.append(
-    str(PROJECT_ROOT)
-)
-from src.models.graphsage_model import GraphSAGE
-
 
 TOP_FEATURES = [
     "trimmed_pce",
@@ -62,9 +56,16 @@ ALL_NODES = [
 
 class PortfolioEnv(gym.Env):
 
-    def __init__(self):
+    def __init__(
+        self,
+        start_idx=0,
+        end_idx=None
+    ):
 
         super().__init__()
+
+        self.start_idx = start_idx
+        self.end_idx = end_idx
 
         self.assets = [
             "AAPL",
@@ -81,7 +82,7 @@ class PortfolioEnv(gym.Env):
 
         self.num_assets = len(self.assets)
 
-        self.embedding_dim = 16
+        self.feature_dim = len(TOP_FEATURES)
 
         self.action_space = spaces.Box(
             low=0,
@@ -95,28 +96,15 @@ class PortfolioEnv(gym.Env):
             high=np.inf,
             shape=(
                 self.num_assets,
-                self.embedding_dim
+                self.feature_dim
             ),
             dtype=np.float32
-        )
-
-        PROJECT_ROOT = (
-            Path(__file__)
-            .resolve()
-            .parents[2]
         )
 
         PROCESSED_DATA_DIR = (
             PROJECT_ROOT /
             "data" /
             "processed"
-        )
-
-        GRAPH_MODEL_PATH = (
-            PROJECT_ROOT /
-            "data" /
-            "graph" /
-            "graphsage_model.pth"
         )
 
         self.price_data = {}
@@ -166,6 +154,18 @@ class PortfolioEnv(gym.Env):
             aligned_returns
         ).T
 
+        if self.end_idx is None:
+
+            self.end_idx = len(
+                self.returns_matrix
+            )
+
+        self.returns_matrix = (
+            self.returns_matrix[
+                self.start_idx:self.end_idx
+            ]
+        )
+
         print(
             "\nRETURNS MATRIX SHAPE:\n"
         )
@@ -174,85 +174,23 @@ class PortfolioEnv(gym.Env):
             self.returns_matrix.shape
         )
 
-        self.graphsage = GraphSAGE(
-            input_dim=16,
-            hidden_dim=32,
-            output_dim=16
-        )
-
-        self.graphsage.load_state_dict(
-            torch.load(
-                GRAPH_MODEL_PATH,
-                map_location=torch.device("cpu")
-            )
-        )
-
-        self.graphsage.eval()
-
-        node_to_idx = {
-            node: idx
-            for idx, node in enumerate(ALL_NODES)
-        }
-
-        EDGES = [
-
-            ("AAPL", "XLK"),
-            ("MSFT", "XLK"),
-            ("NVDA", "XLK"),
-            ("GOOG", "XLK"),
-            ("GOOGL", "XLK"),
-            ("AMZN", "XLK"),
-
-            ("JNJ", "XLV"),
-            ("UNH", "XLV"),
-
-            ("AMZN", "XLY"),
-            ("TSLA", "XLY"),
-
-            ("AAPL", "GSPC"),
-            ("MSFT", "GSPC"),
-            ("NVDA", "GSPC"),
-            ("GOOG", "GSPC"),
-            ("GOOGL", "GSPC"),
-            ("AMZN", "GSPC"),
-            ("TSLA", "GSPC"),
-            ("BRK-B", "GSPC"),
-            ("JNJ", "GSPC"),
-            ("UNH", "GSPC"),
-
-            ("TNX", "GSPC"),
-            ("FVX", "GSPC"),
-
-            ("N225", "GSPC"),
-            ("FTSE", "GSPC")
-        ]
-
-        edges = []
-
-        for src, dst in EDGES:
-
-            edges.append((
-                node_to_idx[src],
-                node_to_idx[dst]
-            ))
-
-            edges.append((
-                node_to_idx[dst],
-                node_to_idx[src]
-            ))
-
-        edge_index = torch.tensor(
-            edges,
-            dtype=torch.long
-        ).t().contiguous()
-
-        self.edge_index = edge_index
-
         self.current_step = 0
 
         self.portfolio_value = 1.0
 
-        self.max_steps = min_length - 1
+        self.transaction_cost_rate = 0.001
+
+        self.risk_penalty_rate = 0.001
+
+        self.previous_weights = np.ones(
+            self.num_assets
+        ) / self.num_assets
+
+        self.portfolio_returns_history = []
+
+        self.max_steps = (
+            len(self.returns_matrix) - 1
+        )
 
     def _get_state(self):
 
@@ -262,7 +200,12 @@ class PortfolioEnv(gym.Env):
 
             df = self.price_data[node]
 
-            row = df.iloc[self.current_step]
+            actual_idx = (
+                self.start_idx +
+                self.current_step
+            )
+
+            row = df.iloc[actual_idx]
 
             feature_vector = (
                 row[TOP_FEATURES]
@@ -274,23 +217,16 @@ class PortfolioEnv(gym.Env):
                 feature_vector
             )
 
-        x = torch.tensor(
+        node_features = np.array(
             node_features,
-            dtype=torch.float
+            dtype=np.float32
         )
 
-        with torch.no_grad():
-
-            embeddings = self.graphsage(
-                x,
-                self.edge_index
-            )
-
-        tradable_embeddings = embeddings[
+        tradable_nodes = node_features[
             :self.num_assets
         ]
 
-        return tradable_embeddings.numpy()
+        return tradable_nodes
 
     def reset(
         self,
@@ -303,6 +239,12 @@ class PortfolioEnv(gym.Env):
         self.current_step = 0
 
         self.portfolio_value = 1.0
+
+        self.previous_weights = np.ones(
+            self.num_assets
+        ) / self.num_assets
+
+        self.portfolio_returns_history = []
 
         state = self._get_state()
 
@@ -330,10 +272,51 @@ class PortfolioEnv(gym.Env):
             ]
         )
 
-        reward = np.dot(
+        portfolio_return = np.dot(
             action,
             asset_returns
         )
+
+        self.portfolio_returns_history.append(
+            portfolio_return
+        )
+
+        if len(
+            self.portfolio_returns_history
+        ) >= 20:
+
+            volatility = np.std(
+                self.portfolio_returns_history[-20:]
+            )
+
+        else:
+
+            volatility = 0
+
+        turnover = np.sum(
+            np.abs(
+                action -
+                self.previous_weights
+            )
+        )
+
+        transaction_cost = (
+            self.transaction_cost_rate *
+            turnover
+        )
+
+        risk_penalty = (
+            self.risk_penalty_rate *
+            volatility
+        )
+
+        reward = (
+            portfolio_return
+            - transaction_cost
+            - risk_penalty
+        )
+
+        self.previous_weights = action.copy()
 
         self.portfolio_value *= (
             1 + reward
@@ -350,7 +333,22 @@ class PortfolioEnv(gym.Env):
 
         info = {
             "portfolio_value":
-            self.portfolio_value
+            self.portfolio_value,
+
+            "portfolio_return":
+            portfolio_return,
+
+            "transaction_cost":
+            transaction_cost,
+
+            "turnover":
+            turnover,
+
+            "volatility":
+            volatility,
+
+            "risk_penalty":
+            risk_penalty
         }
 
         return (

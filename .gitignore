@@ -7,3 +7,5 @@ data/raw
 data/processed
 data/graph
 .env
+src/rl/ppo_logs
+src/rl/checkpoints
