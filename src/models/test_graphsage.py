@@ -7,7 +7,7 @@ GRAPH_PATH=PROJECT_ROOT/"data"/"graph"/"financial_graph.pt"
 
 graph_data=torch.load(GRAPH_PATH,weights_only=False)
 print(graph_data)
-
+x
 model=GraphSAGE(input_dim=16,hidden_dim=32,output_dim=16)
 
 embeddings = model(graph_data.x,graph_data.edge_index)

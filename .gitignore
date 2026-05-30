@@ -1,11 +1,10 @@
+.DS_Store
 venv/
 __pycache__/
 .ipynb_checkpoints/
 outputs/checkpoints/
 outputs/logs/
-data/raw
-data/processed
-data/graph
+data/
 .env
 src/rl/ppo_logs
 src/rl/checkpoints

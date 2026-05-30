@@ -1,6 +1,13 @@
 import sys
+import torch
 
 from pathlib import Path
+
+from stable_baselines3 import PPO
+
+from stable_baselines3.common.vec_env import (
+    DummyVecEnv
+)
 
 PROJECT_ROOT = (
     Path(__file__)
@@ -12,74 +19,76 @@ sys.path.append(
     str(PROJECT_ROOT)
 )
 
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback
-
 from portfolio_env import PortfolioEnv
 
-from src.models.graphsage_extractor import (
-    GraphSAGEExtractor
-)
+
+env = DummyVecEnv([
+
+    lambda: PortfolioEnv()
+])
 
 
-env = PortfolioEnv(
-    start_idx=0,
-    end_idx=2200
-)
+policy_kwargs = dict(
 
-checkpoint_callback = CheckpointCallback(
-    save_freq=50000,
-    save_path="./checkpoints/",
-    name_prefix="ppo_grl"
+    activation_fn=torch.nn.ReLU,
+
+    net_arch=dict(
+
+        pi=[256, 128],
+
+        vf=[256, 128]
+    )
 )
 
 model = PPO(
 
-    policy="MlpPolicy",
+    "MlpPolicy",
 
-    env=env,
+    env,
 
-    learning_rate=1e-4,
+    learning_rate=0.0003,
 
-    n_steps=32,
+    n_steps=2048,
 
-    batch_size=8,
+    batch_size=256,
 
     gamma=0.99,
 
     gae_lambda=0.95,
 
-    clip_range=0.5,
+    clip_range=0.2,
 
-    ent_coef=0.01,
+    ent_coef=0.005,
 
     verbose=1,
 
-    tensorboard_log="./ppo_logs/",
-
-    policy_kwargs=dict(
-
-        features_extractor_class=
-        GraphSAGEExtractor,
-
-        features_extractor_kwargs=dict(
-            features_dim=128
-        )
-    )
+    policy_kwargs=policy_kwargs
 )
 
 model.learn(
-    total_timesteps=500000,
-    callback=checkpoint_callback
+
+    total_timesteps=3000000
+)
+
+MODEL_PATH = (
+    PROJECT_ROOT /
+    "data" /
+    "rl_models" /
+    "ppo_portfolio"
+)
+
+MODEL_PATH.parent.mkdir(
+
+    parents=True,
+
+    exist_ok=True
 )
 
 model.save(
-    "ppo_portfolio_agent"
+    MODEL_PATH
 )
 
-print("\nTRAINING COMPLETE\n")
-
 print(
-    "MODEL SAVED AS: "
-    "ppo_portfolio_agent.zip"
+    f"\nMODEL SAVED TO:\n"
+    f"{MODEL_PATH}"
 )

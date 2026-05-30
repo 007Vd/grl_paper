@@ -1,6 +1,10 @@
 import sys
+import numpy as np
+import matplotlib.pyplot as plt
 
 from pathlib import Path
+
+from stable_baselines3 import PPO
 
 PROJECT_ROOT = (
     Path(__file__)
@@ -11,29 +15,24 @@ PROJECT_ROOT = (
 sys.path.append(
     str(PROJECT_ROOT)
 )
-import numpy as np
-import matplotlib.pyplot as plt
-
-from stable_baselines3 import PPO
 
 from portfolio_env import PortfolioEnv
 
-from src.models.graphsage_extractor import (
-    GraphSAGEExtractor
+
+MODEL_PATH = (
+    PROJECT_ROOT /
+    "data" /
+    "rl_models" /
+    "ppo_portfolio.zip"
 )
 
-
-env = PortfolioEnv(
-    start_idx=2800,
-    end_idx=3400
-)
+env = PortfolioEnv()
 
 model = PPO.load(
-    "ppo_portfolio_agent",
-    env=env
+    MODEL_PATH
 )
 
-state, info = env.reset()
+obs, _ = env.reset()
 
 portfolio_values = []
 
@@ -44,64 +43,92 @@ done = False
 while not done:
 
     action, _ = model.predict(
-        state,
+        obs,
         deterministic=True
     )
 
-    next_state, reward, terminated, truncated, info = env.step(action)
+    obs, reward, terminated, truncated, info = env.step(
+        action
+    )
+
+    done = (
+        terminated or
+        truncated
+    )
 
     portfolio_values.append(
+
         info["portfolio_value"]
     )
 
-    rewards.append(reward)
+    rewards.append(
+        reward
+    )
 
-    state = next_state
+portfolio_values = np.array(
+    portfolio_values
+)
 
-    done = terminated or truncated
-
-print("\nFINAL PORTFOLIO VALUE:\n")
-
-print(portfolio_values[-1])
+rewards = np.array(
+    rewards
+)
 
 total_return = (
     portfolio_values[-1] - 1
 )
 
-volatility = np.std(rewards)
+volatility = np.std(
+    rewards
+)
 
 sharpe_ratio = (
     np.mean(rewards)
     /
-    (np.std(rewards) + 1e-8)
-)
-
-portfolio_array = np.array(
-    portfolio_values
+    (
+        volatility + 1e-8
+    )
 )
 
 running_max = np.maximum.accumulate(
-    portfolio_array
+    portfolio_values
 )
 
 drawdowns = (
-    portfolio_array -
+    portfolio_values -
     running_max
 ) / running_max
 
 max_drawdown = drawdowns.min()
 
+print("\nFINAL PORTFOLIO VALUE:\n")
+
+print(
+    portfolio_values[-1]
+)
+
 print("\nTOTAL RETURN:\n")
-print(total_return)
+
+print(
+    total_return
+)
 
 print("\nVOLATILITY:\n")
-print(volatility)
+
+print(
+    volatility
+)
 
 print("\nSHARPE RATIO:\n")
-print(sharpe_ratio)
+
+print(
+    sharpe_ratio
+)
 
 print("\nMAX DRAWDOWN:\n")
-print(max_drawdown)
+
+print(
+    max_drawdown
+)
 
 plt.figure(figsize=(12,6))
 
@@ -117,11 +144,7 @@ plt.ylabel("Portfolio Value")
 
 plt.grid(True)
 
-plt.savefig(
-    "portfolio_value.png"
-)
-
-plt.close()
+plt.show()
 
 plt.figure(figsize=(12,6))
 
@@ -137,8 +160,4 @@ plt.ylabel("Reward")
 
 plt.grid(True)
 
-plt.savefig(
-    "reward_dynamics.png"
-)
-
-plt.close()
+plt.show()
